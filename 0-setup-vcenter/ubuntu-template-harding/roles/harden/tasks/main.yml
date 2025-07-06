@@ -1,0 +1,126 @@
+- name: Set hostname
+  hostname:
+    name: ubuntu-template
+
+- name: Create admin user
+  user:
+    name: devops
+    groups: sudo
+    shell: /bin/bash
+    state: present
+    create_home: true
+
+- name: Set authorized key for devops
+  authorized_key:
+    user: devops
+    state: present
+    key: "{{ lookup('file', 'files/ssh_authorized_keys') }}"
+
+- name: Disable root SSH login
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PermitRootLogin"
+    line: "PermitRootLogin no"
+    state: present
+
+- name: Disable password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+
+- name: Restart SSH
+  service:
+    name: ssh
+    state: restarted
+
+- name: Install common packages
+  apt:
+    name:
+      - curl
+      - wget
+      - vim
+      - git
+      - net-tools
+      - ufw
+      - fail2ban
+      - htop
+      - unzip
+      - gnupg
+      - lsb-release
+      - ca-certificates
+      - software-properties-common
+      - bash-completion
+    state: present
+    update_cache: true
+
+- name: Configure UFW
+  ufw:
+    rule: allow
+    name: OpenSSH
+
+- name: Set UFW default policies
+  ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+
+- name: Enable Fail2Ban
+  systemd:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+- name: Install open-vm-tools
+  apt:
+    name: open-vm-tools
+    state: present
+
+- name: Install cloud-init
+  apt:
+    name: cloud-init
+    state: present
+
+- name: Clean cloud-init
+  command: cloud-init clean
+  ignore_errors: true
+
+- name: Remove machine-id
+  file:
+    path: /etc/machine-id
+    state: absent
+
+- name: Recreate machine-id
+  command: touch /etc/machine-id
+
+- name: Truncate machine-id
+  copy:
+    dest: /etc/machine-id
+    content: ""
+
+- name: Remove dbus machine-id
+  file:
+    path: /var/lib/dbus/machine-id
+    state: absent
+
+- name: Symlink machine-id
+  file:
+    src: /etc/machine-id
+    dest: /var/lib/dbus/machine-id
+    state: link
+    force: yes
+
+- name: Clean logs
+  shell: |
+    journalctl --rotate
+    journalctl --vacuum-time=1s
+    rm -rf /var/log/*.gz /var/log/*.[0-9] /var/log/*.old
+  args:
+    warn: false
+
+- name: Zero out disk space (optional)
+  shell: |
+    dd if=/dev/zero of=/zerofile bs=1M || true
+    rm -f /zerofile
+  when: ansible_virtualization_type != 'docker'

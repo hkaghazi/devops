@@ -1,0 +1,5 @@
+- name: Harden Ubuntu 24.04 Template
+  hosts: ubuntu_template
+  become: true
+  roles:
+    - harden
