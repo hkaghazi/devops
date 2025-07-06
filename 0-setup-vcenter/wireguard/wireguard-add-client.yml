@@ -1,0 +1,84 @@
+---
+- name: Add WireGuard Client Peer
+  hosts: localhost
+  connection: local
+  become: yes
+
+  vars:
+    client_name: "client1"
+    wg_interface: "wg0"
+    wg_conf_dir: "/etc/wireguard"
+    wg_server_ip: "10.10.0.1"
+    wg_server_port: 51820
+    wg_network: "10.10.0.0/24"
+    client_ip: "10.10.0.2"
+    client_private_key_path: "/etc/wireguard/keys/{{ client_name }}_private.key"
+    client_public_key_path: "/etc/wireguard/keys/{{ client_name }}_public.key"
+    server_public_key_path: "/etc/wireguard/server_public.key"
+    output_client_conf_path: "/etc/wireguard/{{ client_name }}.conf"
+
+  tasks:
+    - name: Ensure keys directory exists
+      file:
+        path: "/etc/wireguard/keys"
+        state: directory
+        mode: '0700'
+
+    - name: Generate client private key
+      command: wg genkey
+      register: client_private_key
+      args:
+        creates: "{{ client_private_key_path }}"
+
+    - name: Save client private key
+      copy:
+        content: "{{ client_private_key.stdout }}"
+        dest: "{{ client_private_key_path }}"
+        mode: '0600'
+
+    - name: Generate client public key
+      command: "bash -c 'echo {{ client_private_key.stdout }} | wg pubkey'"
+      register: client_public_key
+
+    - name: Save client public key
+      copy:
+        content: "{{ client_public_key.stdout }}"
+        dest: "{{ client_public_key_path }}"
+        mode: '0644'
+
+    - name: Read server public key
+      slurp:
+        src: "{{ server_public_key_path }}"
+      register: server_pubkey
+
+    - name: Add client to server WireGuard config
+      lineinfile:
+        path: "{{ wg_conf_dir }}/{{ wg_interface }}.conf"
+        insertafter: EOF
+        line: |
+          [Peer]
+          PublicKey = {{ client_public_key.stdout }}
+          AllowedIPs = {{ client_ip }}/32
+      notify: Restart WireGuard
+
+    - name: Generate client config file
+      copy:
+        dest: "{{ output_client_conf_path }}"
+        mode: '0600'
+        content: |
+          [Interface]
+          PrivateKey = {{ client_private_key.stdout }}
+          Address = {{ client_ip }}/32
+          DNS = 8.8.8.8
+
+          [Peer]
+          PublicKey = {{ server_pubkey.content | b64decode }}
+          Endpoint = {{ wg_server_ip }}:{{ wg_server_port }}
+          AllowedIPs = 0.0.0.0/0
+          PersistentKeepalive = 25
+
+  handlers:
+    - name: Restart WireGuard
+      systemd:
+        name: "wg-quick@{{ wg_interface }}"
+        state: restarted
