@@ -1,0 +1,2 @@
+- name: Join worker node
+  shell: kubeadm join 192.168.1.100:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
